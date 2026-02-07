@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 import typer
 
-CODE_EXTENSIONS = {".py", ".yaml", ".yml", ".toml", ".json", ".md"}
+CODE_EXTENSIONS = {".py", ".yaml", ".yml", ".toml", ".json"}
 
 EXCLUDED_DIRS = {
     ".git",
@@ -31,7 +31,8 @@ def retrieve_flattened_codebase(path: Path) -> str:
         relative_path = file.relative_to(path).as_posix()
         sections.append(f"## {relative_path}")
 
-        if file.suffix in CODE_EXTENSIONS:
+        if file.suffix in CODE_EXTENSIONS or file.name == "README.md":
+            print(f"retrieve_flattened_codebase.{file.suffix = }")
             try:
                 content = file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
@@ -62,7 +63,7 @@ def parse_code(file_content: str) -> str:
 
 def _git_diff(target: str) -> str:
     return subprocess.check_output(
-        ["git", "diff", f"{target}...HEAD"],
+        ["git", "diff", f"origin/{target}", "--minimal"],
         text=True,
     )
 
@@ -81,8 +82,6 @@ def get_diff_by_file() -> list[str]:
             raise RuntimeError(
                 "Failed to get git diff against 'main' or 'master'"
             ) from master_exception
-
-    print(f"get_diff_by_file.{diff = }")
 
     files: list[str] = []
     current: list[str] = []
@@ -112,20 +111,20 @@ def get_system_prompt(
     return f"""
 You are a senior software engineer performing a strict pull request review.
 
-## User Instructions
-{user_instructions}
-
-## Repository Snapshot
-{flattened_codebase}
-
-## Code Changes
-{diffs_block}
-
-## Task
+# Tasks
 - Identify bugs, risks, and design issues
 - Suggest improvements
 - Reference exact file paths and line numbers
 - Be concise, precise, and actionable
+
+# User Instructions
+{user_instructions}
+
+# Repository Snapshot
+{flattened_codebase}
+
+# Code Changes
+{diffs_block}
 """.strip()
 
 

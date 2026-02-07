@@ -49,9 +49,11 @@ def main(
         diffs=diffs,
     )
 
-    # typer.echo("\n" + "=" * 80 + "\n")
-    # typer.echo(system_prompt)
-    # typer.echo("\n" + "=" * 80)
+    typer.echo("\n" + "=" * 80 + "\n")
+    typer.echo(system_prompt)
+    typer.echo("\n" + "=" * 80 + "\n")
+    typer.echo(f"Token Count: {len(system_prompt) // 4:,}")
+    typer.echo("\n" + "=" * 80)
 
 
 if __name__ == "__main__":
