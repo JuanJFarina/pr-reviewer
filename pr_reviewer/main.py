@@ -3,9 +3,13 @@ import tempfile
 from pathlib import Path
 from contextlib import contextmanager
 
+from .utils import Settings
+
 import typer
 
 CODE_EXTENSIONS = {".py", ".yaml", ".yml", ".toml", ".json"}
+
+OTHER_FILES = {"README.md", "Dockerfile", "Makefile"}
 
 EXCLUDED_DIRS = {
     ".git",
@@ -31,8 +35,7 @@ def retrieve_flattened_codebase(path: Path) -> str:
         relative_path = file.relative_to(path).as_posix()
         sections.append(f"## {relative_path}")
 
-        if file.suffix in CODE_EXTENSIONS or file.name == "README.md":
-            print(f"retrieve_flattened_codebase.{file.suffix = }")
+        if file.suffix in CODE_EXTENSIONS or file.name in OTHER_FILES:
             try:
                 content = file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
@@ -61,20 +64,21 @@ def parse_code(file_content: str) -> str:
     )
 
 
-def _git_diff(target: str) -> str:
+def _git_diff(repo_path: Path, target: str) -> str:
     return subprocess.check_output(
-        ["git", "diff", f"origin/{target}", "--minimal"],
+        ["git", "diff", f"origin/{target}", "HEAD", "--minimal"],
+        cwd=repo_path,
         text=True,
     )
 
 
-def get_diff_by_file() -> list[str]:
+def get_diff_by_file(repo_path: Path) -> list[str]:
     try:
-        diff = _git_diff("main")
+        diff = _git_diff(repo_path, "main")
     except subprocess.CalledProcessError as main_exception:
         print(f"get_diff_by_file.subprocess.CalledProcessError.{main_exception = }")
         try:
-            diff = _git_diff("master")
+            diff = _git_diff(repo_path, "master")
         except subprocess.CalledProcessError as master_exception:
             print(
                 f"get_diff_by_file.subprocess.CalledProcessError.{master_exception = }"
@@ -100,32 +104,72 @@ def get_diff_by_file() -> list[str]:
 
 
 def get_system_prompt(
-    user_instructions: str,
+    user_context: str,
+    coding_rules: str,
     flattened_codebase: str,
     diffs: list[str],
 ) -> str:
-    diffs_block = "\n\n".join(
-        f"### Diff {i + 1}\n```diff\n{diff}\n```" for i, diff in enumerate(diffs)
-    )
+    diffs_block = "\n\n".join(f"```{diff}\n```" for diff in diffs)
 
-    return f"""
-You are a senior software engineer performing a strict pull request review.
+    return """
+You are a Pull Request Reviewer AI agent.
+You will be given:
 
-# Tasks
-- Identify bugs, risks, and design issues
-- Suggest improvements
-- Reference exact file paths and line numbers
-- Be concise, precise, and actionable
+- User Context (optional) to understand specific criteria for this review
+- A number of coding rules to check against the code changes
+- A snapshot of the repository regarding all relevant files
+- Code changes to review
 
-# User Instructions
-{user_instructions}
+Your output must be a JSON object with the following structure:
+
+```json
+{{
+    "approved": boolean,
+    "change_requests": [
+        {{
+            "file": "path/to/file.ext",
+            "line": 123,
+            "comment": "Description of the issue and suggested improvement"
+        }}
+    ],
+    "summary": "A brief summary of what the PR changes seem to be trying to achieve, and any concerns or positive feedback you have about the implementation",
+}}
+```
+
+# User context
+
+{user_context}
+
+# Coding Rules
+
+{coding_rules}
 
 # Repository Snapshot
+
 {flattened_codebase}
 
 # Code Changes
+
 {diffs_block}
-""".strip()
+""".strip().format(
+        user_context=user_context,
+        coding_rules=coding_rules,
+        flattened_codebase=flattened_codebase,
+        diffs_block=diffs_block,
+    )
+
+
+def _fetch_branch(repo_path: Path, branch: str) -> bool:
+    try:
+        subprocess.check_call(
+            ["git", "fetch", "origin", branch],
+            cwd=repo_path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 
 @contextmanager
@@ -134,31 +178,37 @@ def clone_branch(repo_url: str, branch: str):
         repo_path = Path(tmp_dir)
 
         try:
+            # Clone ONLY the PR branch
             subprocess.check_call(
                 [
                     "git",
                     "clone",
-                    "--depth",
-                    "1",
                     "--branch",
                     branch,
-                    "--single-branch",
                     repo_url,
                     str(repo_path),
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
             )
+
+            fetched = _fetch_branch(repo_path, "main") or _fetch_branch(
+                repo_path, "master"
+            )
+
+            if not fetched:
+                raise RuntimeError("Could not fetch base branch 'main' or 'master'")
+
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
-                f"Failed to clone branch '{branch}' from '{repo_url}'"
+                f"Failed to prepare repository '{repo_url}@{branch}'"
             ) from exc
 
         yield repo_path
 
 
 def get_rules() -> str:
-    rules_dir = Path("coding_rules")
+    rules_dir = Settings.CODING_RULES_PATH
     sections: list[str] = []
 
     if not rules_dir.exists():

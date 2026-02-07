@@ -7,6 +7,7 @@ name = "pypi"
 pydantic = "*"
 pydantic-settings = "*"
 typer = "*"
+google-genai = "*"
 
 [dev-packages]
 
