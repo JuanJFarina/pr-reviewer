@@ -39,11 +39,14 @@ def retrieve_flattened_codebase(path: Path) -> str:
             try:
                 content = file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
-                sections.append("_Binary or non-UTF8 file omitted_\n")
+                sections.append("_Binary or non-UTF8 file contents omitted_\n")
                 continue
 
             parsed = parse_code(content)
             sections.append(parsed)
+
+        else:
+            sections.append("_Non-code file contents omitted_\n")
 
         sections.append("")  # spacing
 
@@ -69,6 +72,8 @@ def _git_diff(repo_path: Path, target: str) -> str:
         ["git", "diff", f"origin/{target}", "HEAD", "--minimal"],
         cwd=repo_path,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -136,17 +141,25 @@ Your output must be a JSON object with the following structure:
 }}
 ```
 
+================================================================================
+
 # User context
 
 {user_context}
+
+================================================================================
 
 # Coding Rules
 
 {coding_rules}
 
+================================================================================
+
 # Repository Snapshot
 
 {flattened_codebase}
+
+================================================================================
 
 # Code Changes
 
@@ -235,3 +248,12 @@ def parse_repo_ref(repo_ref: str) -> tuple[str, str]:
         )
 
     return repo_url, branch
+
+
+def get_partitioned_calls(system_prompt: str, diffs: list[str]) -> list[str]:
+    if (len(system_prompt) / 4) < Settings.MAX_TOKENS_CONTEXT_WINDOW:
+        return [system_prompt]
+
+    print(f"Prompt exceeds context window, diffs are size: {len(diffs) / 4:,} tokens")
+
+    return [system_prompt]  # TO DO: placeholder until actual implementation

@@ -10,6 +10,8 @@ class _Settings(BaseSettings):
     AZURE_OPENAI_KEY: str | None = None
     AZURE_OPENAI_MODEL: str = "gpt-5.2"
 
+    MAX_TOKENS_CONTEXT_WINDOW: int = 200_000
+
     @property
     def CODING_RULES_PATH(self) -> Path:
         return Path(__file__).parent.parent / "coding_rules"
